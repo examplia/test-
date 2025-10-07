@@ -37,46 +37,70 @@ local function isMobileDevice()
     return userInputService.TouchEnabled and not userInputService.MouseEnabled
 end
 
--- Get responsive sizing based on device
-local function getResponsiveSize()
-    local isMobile = isMobileDevice()
+-- Enhanced mobile error logging function
+local function logMobileError(context, errorMsg, additionalInfo)
+    if not isMobile then return end
+
+    local timestamp = os.date("%H:%M:%S")
+    local deviceInfo = string.format("[Mobile:%s] ", timestamp)
+
+    local fullMessage = string.format("%s[%s] ERROR: %s", deviceInfo, context, errorMsg)
+
+    if additionalInfo then
+        fullMessage = fullMessage .. string.format(" | INFO: %s", additionalInfo)
+    end
+
+    print(fullMessage)
+    warn(string.format("[Follow Script Mobile Debug] %s: %s", context, errorMsg))
+
+    -- Update UI with mobile-specific error info
+    if statusLabel then
+        statusLabel.Text = string.format("Status: MOBILE ERROR\n%s\n%s", context, errorMsg)
+    end
+end
+
+-- Mobile-optimized sizing (mobile-only, no desktop variants needed)
+local function getMobileOptimizedSize()
     return {
-        frameWidth = isMobile and 320 or 280,
-        frameHeight = isMobile and 200 or 180,
-        buttonWidth = isMobile and 280 or 250,
-        buttonHeight = isMobile and 40 or 35,
-        titleSize = isMobile and 18 or 16,
-        textSize = isMobile and 12 or 11
+        frameWidth = 320,
+        frameHeight = 200,
+        buttonWidth = 280,
+        buttonHeight = 40,
+        titleSize = 18,
+        textSize = 12
     }
 end
 
-print("=== FOLLOW SCRIPT INITIALIZING ===")
-print("[Follow Script] Version: " .. SCRIPT_VERSION)
-print("[Follow Script] Target User ID: " .. TARGET_USER_ID)
-print("[Follow Script] Target Username: " .. TARGET_USERNAME)
-print("[Follow Script] Target Display Name: " .. TARGET_DISPLAYNAME)
+print("=== MOBILE FOLLOW SCRIPT INITIALIZING ===")
+print("[Mobile Follow Script] Version: " .. SCRIPT_VERSION)
+print("[Mobile Follow Script] Target User ID: " .. TARGET_USER_ID)
+print("[Mobile Follow Script] Target Username: " .. TARGET_USERNAME)
+print("[Mobile Follow Script] Target Display Name: " .. TARGET_DISPLAYNAME)
+print("[Mobile Follow Script] Mobile-optimized: true")
 
 -- Wait for character
 local function waitForCharacter()
     return LocalPlayer.Character or LocalPlayer.CharacterAdded:Wait()
 end
 
-print("[Follow Script] Creating UI...")
+print("[Mobile Follow Script] Creating mobile-optimized UI...")
 
--- Get responsive sizing
-local sizes = getResponsiveSize()
-local isMobile = isMobileDevice()
+-- Get mobile-optimized sizing (mobile-only)
+local sizes = getMobileOptimizedSize()
+local isMobile = true -- Always true for mobile-only script, remove unnecessary checks
 
--- Create UI
+-- Create UI with mobile-optimized properties
 local screenGui = trackInstance(Instance.new("ScreenGui"))
 screenGui.Name = "FollowScriptUI"
 screenGui.ResetOnSpawn = false
-screenGui.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
 
--- Mobile-specific ScreenGui properties
+-- Simplified mobile ScreenGui properties to prevent coordinate conflicts
 if isMobile then
-    screenGui.IgnoreGuiInset = true
-    screenGui.SafeAreaCompatibility = Enum.SafeAreaCompatibility.FullscreenExtension
+    screenGui.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
+    -- Remove potentially problematic properties that can interfere with touch coordinates
+    print("[Follow Script] Mobile UI: Using simplified ScreenGui properties")
+else
+    screenGui.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
 end
 
 -- Main Frame
@@ -87,27 +111,40 @@ mainFrame.Position = UDim2.new(0.5, -sizes.frameWidth/2, 0.1, 0)
 mainFrame.BackgroundColor3 = Color3.fromRGB(35, 35, 35)
 mainFrame.BorderSizePixel = 0
 mainFrame.Active = true
-mainFrame.Draggable = not isMobile -- Disable default dragging on mobile
+mainFrame.Draggable = false -- Always disable default dragging (mobile-only, use touch dragging)
 
--- Add touch-based dragging for mobile
+-- Simplified touch-based dragging for mobile (less intrusive to avoid movement conflicts)
 if isMobile then
     local dragStart, startPos
     local function onTouchStart(input)
         if input.UserInputType == Enum.UserInputType.Touch then
-            dragStart = input.Position
-            startPos = mainFrame.Position
+            -- Only start dragging if touch is on the title area (not buttons)
+            local objects = game:GetService("UserInputService"):GetGuiObjectsAtPosition(input.Position.X, input.Position.Y)
+            local isOnTitle = false
+            for _, obj in ipairs(objects) do
+                if obj.Name == "Title" then
+                    isOnTitle = true
+                    break
+                end
+            end
+
+            if isOnTitle then
+                dragStart = input.Position
+                startPos = mainFrame.Position
+                print("[Follow Script] Mobile UI: Started dragging from title")
+            end
         end
     end
 
     local function onTouchMove(input)
-        if input.UserInputType == Enum.UserInputType.Touch and dragStart then
+        if input.UserInputType == Enum.UserInputType.Touch and dragStart and startPos then
             local delta = input.Position - dragStart
             local newX = startPos.X.Offset + delta.X
             local newY = startPos.Y.Offset + delta.Y
 
             -- Keep frame within screen bounds
             local screenSize = workspace.CurrentCamera.ViewportSize
-            newX = math.clamp(newX, -sizes.frameWidth/2, screenSize.X - sizes.frameWidth/2)
+            newX = math.clamp(newX, 0, screenSize.X - sizes.frameWidth)
             newY = math.clamp(newY, 0, screenSize.Y - sizes.frameHeight)
 
             mainFrame.Position = UDim2.new(0, newX, 0, newY)
@@ -115,7 +152,11 @@ if isMobile then
     end
 
     local function onTouchEnd()
+        if dragStart then
+            print("[Follow Script] Mobile UI: Stopped dragging")
+        end
         dragStart = nil
+        startPos = nil
     end
 
     mainFrame.InputBegan:Connect(onTouchStart)
@@ -381,6 +422,49 @@ local function getCharacterParts(character)
     return humanoid, rootPart
 end
 
+-- Movement validation system for mobile
+local lastPosition = nil
+local lastMovementCheck = 0
+local movementValidationInterval = isMobile and 1.0 or 2.0 -- Check more frequently on mobile
+
+local function validateMovement()
+    if not isMobile then return true end -- Only validate on mobile
+
+    local character = LocalPlayer.Character
+    if not character then return false end
+
+    local _, rootPart = getCharacterParts(character)
+    if not rootPart then return false end
+
+    local currentTime = tick()
+
+    -- Initialize or update position tracking
+    if not lastPosition then
+        lastPosition = rootPart.Position
+        lastMovementCheck = currentTime
+        return true -- First check, assume valid
+    end
+
+    -- Check if enough time has passed for validation
+    if currentTime - lastMovementCheck < movementValidationInterval then
+        return true -- Too soon to check
+    end
+
+    local distanceMoved = (rootPart.Position - lastPosition).Magnitude
+    local expectedMovement = 2.0 -- Minimum expected movement in studs per validation interval
+
+    lastPosition = rootPart.Position
+    lastMovementCheck = currentTime
+
+    if distanceMoved < expectedMovement then
+        print(string.format("[Follow Script] Mobile: Low movement detected (%.2f studs, expected %.2f+)", distanceMoved, expectedMovement))
+        return false
+    end
+
+    print(string.format("[Follow Script] Mobile: Movement validated (%.2f studs)", distanceMoved))
+    return true
+end
+
 -- Function to follow target with error handling
 local function followTarget(targetPosition)
     local success, errorMsg = pcall(function()
@@ -411,13 +495,18 @@ local function followTarget(targetPosition)
         print(string.format("[Follow Script] Following target (%.1f studs away)", distance))
 
         if distance > MIN_DISTANCE then
-            -- Create path
-            local path = PathfindingService:CreatePath({
-                AgentRadius = 2,
-                AgentHeight = 5,
-                AgentCanJump = true,
-                WaypointSpacing = 3
-            })
+            -- Create path with mobile-optimized parameters
+            local pathParams = {
+                AgentHeight = isMobile and 6 or 5,
+                WaypointSpacing = isMobile and 4 or 3
+            }
+
+            -- Mobile-only pathfinding parameters (optimized for mobile)
+            pathParams.AgentRadius = 3
+            pathParams.AgentCanJump = false -- Disable jumping on mobile (unreliable)
+            print("[Mobile Follow Script] Using mobile-optimized pathfinding parameters")
+
+            local path = PathfindingService:CreatePath(pathParams)
 
             local pathSuccess, pathError = pcall(function()
                 path:ComputeAsync(rootPart.Position, targetPosition)
@@ -438,15 +527,66 @@ local function followTarget(targetPosition)
 
                     humanoid:MoveTo(nextWaypoint.Position)
                     print("[Follow Script] Moving to waypoint")
+
+                    -- Mobile movement validation
+                    if isMobile then
+                        local validationSuccess = validateMovement()
+                        if not validationSuccess then
+                            print("[Follow Script] Mobile: Movement validation failed, retrying...")
+                            task.wait(0.1) -- Brief pause before retry
+                            humanoid:MoveTo(nextWaypoint.Position)
+                        end
+                    end
                 else
                     -- Fallback to direct movement
                     humanoid:MoveTo(targetPosition)
                     print("[Follow Script] Direct movement (no waypoints)")
+
+                    -- Mobile movement validation for direct movement
+                    if isMobile then
+                        local validationSuccess = validateMovement()
+                        if not validationSuccess then
+                            print("[Follow Script] Mobile: Direct movement validation failed, retrying...")
+                            task.wait(0.1) -- Brief pause before retry
+                            humanoid:MoveTo(targetPosition)
+                        end
+                    end
                 end
             else
-                -- Pathfinding failed, move directly
-                humanoid:MoveTo(targetPosition)
-                print("[Follow Script] Pathfinding failed, using direct movement")
+                -- Pathfinding failed, use mobile-specific fallback strategy
+                if isMobile then
+                    print("[Follow Script] Mobile: Pathfinding failed, using enhanced fallback strategy")
+
+                    -- Mobile fallback strategy 1: Direct movement with validation
+                    local fallbackAttempts = 0
+                    local maxFallbackAttempts = 3
+
+                    while fallbackAttempts < maxFallbackAttempts do
+                        humanoid:MoveTo(targetPosition)
+                        print(string.format("[Follow Script] Mobile: Fallback attempt %d/%d", fallbackAttempts + 1, maxFallbackAttempts))
+
+                        local validationSuccess = validateMovement()
+                        if validationSuccess then
+                            print("[Follow Script] Mobile: Fallback movement successful!")
+                            break
+                        else
+                            fallbackAttempts = fallbackAttempts + 1
+                            if fallbackAttempts < maxFallbackAttempts then
+                                task.wait(0.2) -- Longer pause between mobile fallback attempts
+                                print("[Follow Script] Mobile: Retrying fallback movement...")
+                            end
+                        end
+                    end
+
+                    if fallbackAttempts >= maxFallbackAttempts then
+                        print("[Follow Script] Mobile: All fallback attempts failed")
+                        logMobileError("FallbackMovement", "All fallback attempts failed", string.format("Attempts: %d, Distance: %.1f", maxFallbackAttempts, distance))
+                    end
+                else
+                    -- Desktop fallback (original behavior)
+                    humanoid:MoveTo(targetPosition)
+                    print("[Follow Script] Pathfinding failed, using direct movement")
+                end
             end
         else
             -- Within range, stop moving
@@ -458,7 +598,8 @@ local function followTarget(targetPosition)
 
     if not success then
         print("[Follow Script] ERROR in followTarget: " .. errorMsg)
-        statusLabel.Text = "Status: Movement error\nCheck console for details"
+        logMobileError("followTarget", errorMsg, string.format("TargetPos: %s", tostring(targetPosition)))
+        statusLabel.Text = "Status: MOBILE MOVEMENT ERROR\nCheck console for details"
     end
 end
 
@@ -468,7 +609,7 @@ local loopCount = 0
 local lastDistance = 0
 local dynamicUpdateInterval = UPDATE_INTERVAL
 
-print("[Follow Script] Starting main loop...")
+print("[Mobile Follow Script] Starting mobile-optimized main loop...")
 
 connection = RunService.Heartbeat:Connect(function()
     local success, errorMsg = pcall(function()
@@ -476,10 +617,10 @@ connection = RunService.Heartbeat:Connect(function()
 
         local currentTime = tick()
 
-        -- Distance-based update frequency optimization
+        -- Distance-based update frequency optimization (disabled on mobile for stability)
         local character = LocalPlayer.Character
         local currentDistance = 0
-        if character then
+        if character then -- Mobile-only script, always use fixed interval
             local _, rootPart = getCharacterParts(character)
             if rootPart then
                 local targetPlayer = findTargetPlayer()
@@ -494,6 +635,21 @@ connection = RunService.Heartbeat:Connect(function()
                             dynamicUpdateInterval = UPDATE_INTERVAL * 0.5 -- Faster updates when very close
                         else
                             dynamicUpdateInterval = UPDATE_INTERVAL -- Normal frequency
+                        end
+                    end
+                end
+            end
+        else
+            -- Use fixed interval on mobile for stability
+            dynamicUpdateInterval = UPDATE_INTERVAL
+            if character then
+                local _, rootPart = getCharacterParts(character)
+                if rootPart then
+                    local targetPlayer = findTargetPlayer()
+                    if targetPlayer and targetPlayer.Character then
+                        local _, targetRoot = getCharacterParts(targetPlayer.Character)
+                        if targetRoot then
+                            currentDistance = (targetRoot.Position - rootPart.Position).Magnitude
                         end
                     end
                 end
@@ -553,7 +709,8 @@ connection = RunService.Heartbeat:Connect(function()
 
     if not success then
         print("[Follow Script] ERROR in main loop: " .. errorMsg)
-        statusLabel.Text = "Status: Script error\nCheck console for details"
+        logMobileError("MainLoop", errorMsg, string.format("LoopCount: %d, Distance: %.1f", loopCount, currentDistance))
+        statusLabel.Text = "Status: MOBILE SCRIPT ERROR\nCheck console for details"
 
         -- Implement exponential backoff for error recovery
         if not lastErrorTime then lastErrorTime = tick() end
