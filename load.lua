@@ -10,6 +10,10 @@ local TARGET_DISPLAYNAME = "brokie"
 local UPDATE_INTERVAL = 0.3
 local MIN_DISTANCE = 8
 
+-- Debug logging control
+local DEBUG_MODE = false -- Set to true for verbose logging, false for essential only
+local LOG_THROTTLE_INTERVAL = 45 -- Throttle main loop logging to every 45 seconds
+
 local isEnabled = true
 local connection
 local currentHighlight = nil
@@ -37,9 +41,18 @@ local function isMobileDevice()
     return userInputService.TouchEnabled and not userInputService.MouseEnabled
 end
 
--- Enhanced mobile error logging function
+-- Enhanced mobile error logging function (throttled for performance)
+local lastMobileErrorLog = 0
+local MOBILE_ERROR_THROTTLE = 10 -- Only log mobile errors every 10 seconds max
+
 local function logMobileError(context, errorMsg, additionalInfo)
     if not isMobile then return end
+
+    local currentTime = tick()
+    if currentTime - lastMobileErrorLog < MOBILE_ERROR_THROTTLE then
+        return -- Throttle mobile error logging
+    end
+    lastMobileErrorLog = currentTime
 
     local timestamp = os.date("%H:%M:%S")
     local deviceInfo = string.format("[Mobile:%s] ", timestamp)
@@ -71,19 +84,21 @@ local function getMobileOptimizedSize()
     }
 end
 
-print("=== MOBILE FOLLOW SCRIPT INITIALIZING ===")
-print("[Mobile Follow Script] Version: " .. SCRIPT_VERSION)
-print("[Mobile Follow Script] Target User ID: " .. TARGET_USER_ID)
-print("[Mobile Follow Script] Target Username: " .. TARGET_USERNAME)
-print("[Mobile Follow Script] Target Display Name: " .. TARGET_DISPLAYNAME)
-print("[Mobile Follow Script] Mobile-optimized: true")
+if DEBUG_MODE then
+    print("=== MOBILE FOLLOW SCRIPT INITIALIZING ===")
+    print("[Mobile Follow Script] Version: " .. SCRIPT_VERSION)
+    print("[Mobile Follow Script] Target User ID: " .. TARGET_USER_ID)
+    print("[Mobile Follow Script] Target Username: " .. TARGET_USERNAME)
+    print("[Mobile Follow Script] Target Display Name: " .. TARGET_DISPLAYNAME)
+    print("[Mobile Follow Script] Mobile-optimized: true")
+end
 
 -- Wait for character
 local function waitForCharacter()
     return LocalPlayer.Character or LocalPlayer.CharacterAdded:Wait()
 end
 
-print("[Mobile Follow Script] Creating mobile-optimized UI...")
+if DEBUG_MODE then print("[Mobile Follow Script] Creating mobile-optimized UI...") end
 
 -- Get mobile-optimized sizing (mobile-only)
 local sizes = getMobileOptimizedSize()
@@ -98,7 +113,7 @@ screenGui.ResetOnSpawn = false
 if isMobile then
     screenGui.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
     -- Remove potentially problematic properties that can interfere with touch coordinates
-    print("[Follow Script] Mobile UI: Using simplified ScreenGui properties")
+    if DEBUG_MODE then print("[Follow Script] Mobile UI: Using simplified ScreenGui properties") end
 else
     screenGui.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
 end
@@ -131,7 +146,7 @@ if isMobile then
             if isOnTitle then
                 dragStart = input.Position
                 startPos = mainFrame.Position
-                print("[Follow Script] Mobile UI: Started dragging from title")
+                if DEBUG_MODE then print("[Follow Script] Mobile UI: Started dragging from title") end
             end
         end
     end
@@ -153,7 +168,7 @@ if isMobile then
 
     local function onTouchEnd()
         if dragStart then
-            print("[Follow Script] Mobile UI: Stopped dragging")
+            if DEBUG_MODE then print("[Follow Script] Mobile UI: Stopped dragging") end
         end
         dragStart = nil
         startPos = nil
@@ -239,35 +254,35 @@ destroyCorner.Parent = destroyButton
 
 screenGui.Parent = LocalPlayer:WaitForChild("PlayerGui")
 
-print("[Follow Script] UI Created!")
+if DEBUG_MODE then print("[Follow Script] UI Created!") end
 
 -- Function to find target player with error handling
 local function findTargetPlayer()
     local success, result = pcall(function()
-        print("[Follow Script] Searching for target player...")
-        print("[Follow Script] Total players in server: " .. #Players:GetPlayers())
+        if DEBUG_MODE then
+            print("[Follow Script] Searching for target player...")
+            print("[Follow Script] Total players in server: " .. #Players:GetPlayers())
+        end
 
         for _, player in pairs(Players:GetPlayers()) do
-            print("[Follow Script] Checking player: " .. player.Name .. " (ID: " .. player.UserId .. ", Display: " .. player.DisplayName .. ")")
-
             -- Check by User ID
             if player.UserId == TARGET_USER_ID then
-                print("[Follow Script] ✓ FOUND by User ID!")
+                if DEBUG_MODE then print("[Follow Script] ✓ FOUND by User ID!") end
                 return player
             end
             -- Check by Username (case insensitive)
             if player.Name:lower() == TARGET_USERNAME:lower() then
-                print("[Follow Script] ✓ FOUND by Username!")
+                if DEBUG_MODE then print("[Follow Script] ✓ FOUND by Username!") end
                 return player
             end
             -- Check by Display Name (case insensitive)
             if player.DisplayName:lower() == TARGET_DISPLAYNAME:lower() then
-                print("[Follow Script] ✓ FOUND by Display Name!")
+                if DEBUG_MODE then print("[Follow Script] ✓ FOUND by Display Name!") end
                 return player
             end
         end
 
-        print("[Follow Script] ✗ Target not found in server")
+        if DEBUG_MODE then print("[Follow Script] ✗ Target not found in server") end
         return nil
     end)
 
@@ -457,11 +472,11 @@ local function validateMovement()
     lastMovementCheck = currentTime
 
     if distanceMoved < expectedMovement then
-        print(string.format("[Follow Script] Mobile: Low movement detected (%.2f studs, expected %.2f+)", distanceMoved, expectedMovement))
+        if DEBUG_MODE then print(string.format("[Follow Script] Mobile: Low movement detected (%.2f studs, expected %.2f+)", distanceMoved, expectedMovement)) end
         return false
     end
 
-    print(string.format("[Follow Script] Mobile: Movement validated (%.2f studs)", distanceMoved))
+    if DEBUG_MODE then print(string.format("[Follow Script] Mobile: Movement validated (%.2f studs)", distanceMoved)) end
     return true
 end
 
@@ -492,7 +507,7 @@ local function followTarget(targetPosition)
         local distance = (targetPosition - rootPart.Position).Magnitude
         statusLabel.Text = string.format("Status: FOLLOWING\nDistance: %.1f studs\nMoving to target...", distance)
 
-        print(string.format("[Follow Script] Following target (%.1f studs away)", distance))
+        if DEBUG_MODE then print(string.format("[Follow Script] Following target (%.1f studs away)", distance)) end
 
         if distance > MIN_DISTANCE then
             -- Create path with mobile-optimized parameters
@@ -504,7 +519,7 @@ local function followTarget(targetPosition)
             -- Mobile-only pathfinding parameters (optimized for mobile)
             pathParams.AgentRadius = 3
             pathParams.AgentCanJump = false -- Disable jumping on mobile (unreliable)
-            print("[Mobile Follow Script] Using mobile-optimized pathfinding parameters")
+            if DEBUG_MODE then print("[Mobile Follow Script] Using mobile-optimized pathfinding parameters") end
 
             local path = PathfindingService:CreatePath(pathParams)
 
@@ -515,18 +530,18 @@ local function followTarget(targetPosition)
             if pathSuccess and path.Status == Enum.PathStatus.Success then
                 local waypoints = path:GetWaypoints()
 
-                print("[Follow Script] Path computed - " .. #waypoints .. " waypoints")
+                if DEBUG_MODE then print("[Follow Script] Path computed - " .. #waypoints .. " waypoints") end
 
                 if #waypoints >= 2 then
                     local nextWaypoint = waypoints[2]
 
                     if nextWaypoint.Action == Enum.PathWaypointAction.Jump then
                         humanoid.Jump = true
-                        print("[Follow Script] Jumping!")
+                        if DEBUG_MODE then print("[Follow Script] Jumping!") end
                     end
 
                     humanoid:MoveTo(nextWaypoint.Position)
-                    print("[Follow Script] Moving to waypoint")
+                    if DEBUG_MODE then print("[Follow Script] Moving to waypoint") end
 
                     -- Mobile movement validation
                     if isMobile then
@@ -540,13 +555,13 @@ local function followTarget(targetPosition)
                 else
                     -- Fallback to direct movement
                     humanoid:MoveTo(targetPosition)
-                    print("[Follow Script] Direct movement (no waypoints)")
+                    if DEBUG_MODE then print("[Follow Script] Direct movement (no waypoints)") end
 
                     -- Mobile movement validation for direct movement
                     if isMobile then
                         local validationSuccess = validateMovement()
                         if not validationSuccess then
-                            print("[Follow Script] Mobile: Direct movement validation failed, retrying...")
+                            if DEBUG_MODE then print("[Follow Script] Mobile: Direct movement validation failed, retrying...") end
                             task.wait(0.1) -- Brief pause before retry
                             humanoid:MoveTo(targetPosition)
                         end
@@ -555,7 +570,7 @@ local function followTarget(targetPosition)
             else
                 -- Pathfinding failed, use mobile-specific fallback strategy
                 if isMobile then
-                    print("[Follow Script] Mobile: Pathfinding failed, using enhanced fallback strategy")
+                    if DEBUG_MODE then print("[Follow Script] Mobile: Pathfinding failed, using enhanced fallback strategy") end
 
                     -- Mobile fallback strategy 1: Direct movement with validation
                     local fallbackAttempts = 0
@@ -563,36 +578,36 @@ local function followTarget(targetPosition)
 
                     while fallbackAttempts < maxFallbackAttempts do
                         humanoid:MoveTo(targetPosition)
-                        print(string.format("[Follow Script] Mobile: Fallback attempt %d/%d", fallbackAttempts + 1, maxFallbackAttempts))
+                        if DEBUG_MODE then print(string.format("[Follow Script] Mobile: Fallback attempt %d/%d", fallbackAttempts + 1, maxFallbackAttempts)) end
 
                         local validationSuccess = validateMovement()
                         if validationSuccess then
-                            print("[Follow Script] Mobile: Fallback movement successful!")
+                            if DEBUG_MODE then print("[Follow Script] Mobile: Fallback movement successful!") end
                             break
                         else
                             fallbackAttempts = fallbackAttempts + 1
                             if fallbackAttempts < maxFallbackAttempts then
                                 task.wait(0.2) -- Longer pause between mobile fallback attempts
-                                print("[Follow Script] Mobile: Retrying fallback movement...")
+                                if DEBUG_MODE then print("[Follow Script] Mobile: Retrying fallback movement...") end
                             end
                         end
                     end
 
                     if fallbackAttempts >= maxFallbackAttempts then
-                        print("[Follow Script] Mobile: All fallback attempts failed")
+                        if DEBUG_MODE then print("[Follow Script] Mobile: All fallback attempts failed") end
                         logMobileError("FallbackMovement", "All fallback attempts failed", string.format("Attempts: %d, Distance: %.1f", maxFallbackAttempts, distance))
                     end
                 else
                     -- Desktop fallback (original behavior)
                     humanoid:MoveTo(targetPosition)
-                    print("[Follow Script] Pathfinding failed, using direct movement")
+                    if DEBUG_MODE then print("[Follow Script] Pathfinding failed, using direct movement") end
                 end
             end
         else
             -- Within range, stop moving
             humanoid:MoveTo(rootPart.Position)
             statusLabel.Text = string.format("Status: IN RANGE\nDistance: %.1f studs\nStopped", distance)
-            print("[Follow Script] In range, stopped")
+            if DEBUG_MODE then print("[Follow Script] In range, stopped") end
         end
     end)
 
@@ -608,8 +623,10 @@ local lastUpdate = 0
 local loopCount = 0
 local lastDistance = 0
 local dynamicUpdateInterval = UPDATE_INTERVAL
+local lastLogTime = 0
+local lastLoggedDistance = 0
 
-print("[Mobile Follow Script] Starting mobile-optimized main loop...")
+if DEBUG_MODE then print("[Mobile Follow Script] Starting mobile-optimized main loop...") end
 
 connection = RunService.Heartbeat:Connect(function()
     local success, errorMsg = pcall(function()
@@ -663,8 +680,20 @@ connection = RunService.Heartbeat:Connect(function()
         lastDistance = currentDistance
         loopCount = loopCount + 1
 
-        print(string.format("[Follow Script] Loop #%d (Distance: %.1f, Interval: %.2f)",
-              loopCount, currentDistance, dynamicUpdateInterval))
+        -- Throttled logging: only log every LOG_THROTTLE_INTERVAL seconds and if distance changed significantly
+        local shouldLog = false
+        if currentTime - lastLogTime >= LOG_THROTTLE_INTERVAL then
+            shouldLog = true
+            lastLogTime = currentTime
+        elseif math.abs(currentDistance - lastLoggedDistance) >= 5 then -- Log if distance changed by 5+ studs
+            shouldLog = true
+            lastLoggedDistance = currentDistance
+        end
+
+        if DEBUG_MODE and shouldLog then
+            print(string.format("[Follow Script] Loop #%d (Distance: %.1f, Interval: %.2f)",
+                  loopCount, currentDistance, dynamicUpdateInterval))
+        end
 
         -- Find target player
         local targetPlayer = findTargetPlayer()
@@ -677,7 +706,7 @@ connection = RunService.Heartbeat:Connect(function()
 
         if not targetPlayer.Character then
             statusLabel.Text = "Status: Target found\nCharacter loading..."
-            print("[Follow Script] Target character not loaded yet")
+            if DEBUG_MODE then print("[Follow Script] Target character not loaded yet") end
             removeHighlight()
             return
         end
@@ -686,19 +715,19 @@ connection = RunService.Heartbeat:Connect(function()
 
         if not targetRoot then
             statusLabel.Text = "Status: Target invalid\nCharacter missing parts"
-            print("[Follow Script] Target character invalid")
+            if DEBUG_MODE then print("[Follow Script] Target character invalid") end
             removeHighlight()
             return
         end
 
         if not targetHumanoid or targetHumanoid.Health <= 0 then
             statusLabel.Text = "Status: Target is dead\nWaiting for respawn..."
-            print("[Follow Script] Target is dead")
+            if DEBUG_MODE then print("[Follow Script] Target is dead") end
             removeHighlight()
             return
         end
 
-        print("[Follow Script] Target valid, following...")
+        if DEBUG_MODE then print("[Follow Script] Target valid, following...") end
 
         -- Update highlight on target
         updateHighlight(targetPlayer.Character)
@@ -721,16 +750,18 @@ connection = RunService.Heartbeat:Connect(function()
     end
 end)
 
-print("[Follow Script] ✓ Script fully initialized and running!")
-print("[Follow Script] Check the UI for status updates")
+if DEBUG_MODE then
+    print("[Follow Script] ✓ Script fully initialized and running!")
+    print("[Follow Script] Check the UI for status updates")
+end
 
 -- Try to find target immediately
 task.wait(0.5)
 local initialTarget = findTargetPlayer()
 if initialTarget then
-    print("[Follow Script] ✓✓✓ Initial scan: Target found!")
+    if DEBUG_MODE then print("[Follow Script] ✓✓✓ Initial scan: Target found!") end
 else
-    print("[Follow Script] Initial scan: Target not in server")
+    if DEBUG_MODE then print("[Follow Script] Initial scan: Target not in server") end
 end
 
 -- Combined mouse/touch event handler for toggle button
@@ -738,13 +769,13 @@ local function handleToggleClick()
     local success, errorMsg = pcall(function()
         isEnabled = not isEnabled
 
-        print("[Follow Script] Toggle clicked! New state: " .. tostring(isEnabled))
+        if DEBUG_MODE then print("[Follow Script] Toggle clicked! New state: " .. tostring(isEnabled)) end
 
         if isEnabled then
             toggleButton.Text = "Enabled"
             toggleButton.BackgroundColor3 = Color3.fromRGB(0, 170, 0)
             statusLabel.Text = "Status: ENABLED\nSearching for target..."
-            print("[Follow Script] ✓ Script ENABLED")
+            if DEBUG_MODE then print("[Follow Script] ✓ Script ENABLED") end
         else
             toggleButton.Text = "Disabled"
             toggleButton.BackgroundColor3 = Color3.fromRGB(100, 100, 100)
@@ -762,7 +793,7 @@ local function handleToggleClick()
                 end
             end
 
-            print("[Follow Script] ✗ Script DISABLED")
+            if DEBUG_MODE then print("[Follow Script] ✗ Script DISABLED") end
         end
     end)
 
@@ -779,11 +810,11 @@ end
 -- Combined mouse/touch event handler for destroy button
 local function handleDestroyClick()
     local success, errorMsg = pcall(function()
-        print("[Follow Script] ✗✗✗ DESTROY BUTTON CLICKED ✗✗✗")
+        if DEBUG_MODE then print("[Follow Script] ✗✗✗ DESTROY BUTTON CLICKED ✗✗✗") end
 
         if connection then
             connection:Disconnect()
-            print("[Follow Script] Main loop disconnected")
+            if DEBUG_MODE then print("[Follow Script] Main loop disconnected") end
         end
 
         -- Remove highlight
@@ -795,15 +826,17 @@ local function handleDestroyClick()
             local humanoid, rootPart = getCharacterParts(character)
             if humanoid and rootPart then
                 humanoid:MoveTo(rootPart.Position)
-                print("[Follow Script] Character movement stopped")
+                if DEBUG_MODE then print("[Follow Script] Character movement stopped") end
             end
         end
 
         -- Cleanup all tracked instances
         cleanupTrackedInstances()
 
-        print("[Follow Script] ✓ Script fully destroyed")
-        print("=== FOLLOW SCRIPT TERMINATED ===")
+        if DEBUG_MODE then
+            print("[Follow Script] ✓ Script fully destroyed")
+            print("=== FOLLOW SCRIPT TERMINATED ===")
+        end
     end)
 
     if not success then
@@ -819,7 +852,7 @@ end
 -- Enhanced character respawn handling with cleanup
 LocalPlayer.CharacterAdded:Connect(function(newCharacter)
     local success, errorMsg = pcall(function()
-        print("[Follow Script] Character respawned! Cleaning up...")
+        if DEBUG_MODE then print("[Follow Script] Character respawned! Cleaning up...") end
 
         -- Remove highlight on respawn
         removeHighlight()
@@ -836,7 +869,7 @@ LocalPlayer.CharacterAdded:Connect(function(newCharacter)
             task.wait()
         end
 
-        print("[Follow Script] Character respawn cleanup completed!")
+        if DEBUG_MODE then print("[Follow Script] Character respawn cleanup completed!") end
     end)
 
     if not success then
@@ -847,7 +880,7 @@ end)
 -- Handle character removal for additional cleanup
 LocalPlayer.CharacterRemoving:Connect(function(oldCharacter)
     local success, errorMsg = pcall(function()
-        print("[Follow Script] Character being removed, cleaning up...")
+        if DEBUG_MODE then print("[Follow Script] Character being removed, cleaning up...") end
 
         -- Remove highlight when character is being removed
         removeHighlight()
@@ -858,7 +891,7 @@ LocalPlayer.CharacterRemoving:Connect(function(oldCharacter)
             humanoid:MoveTo(oldCharacter.PrimaryPart and oldCharacter.PrimaryPart.Position or Vector3.zero)
         end
 
-        print("[Follow Script] Character removal cleanup completed!")
+        if DEBUG_MODE then print("[Follow Script] Character removal cleanup completed!") end
     end)
 
     if not success then
@@ -866,6 +899,8 @@ LocalPlayer.CharacterRemoving:Connect(function(oldCharacter)
     end
 end)
 
-print("=== FOLLOW SCRIPT READY ===")
-print("[Follow Script] If you see this, the script loaded successfully!")
-print("[Follow Script] Watch the console for updates every " .. UPDATE_INTERVAL .. " seconds")
+if DEBUG_MODE then
+    print("=== FOLLOW SCRIPT READY ===")
+    print("[Follow Script] If you see this, the script loaded successfully!")
+    print("[Follow Script] Watch the console for updates every " .. UPDATE_INTERVAL .. " seconds")
+end
