@@ -1,7 +1,7 @@
 -- Roblox Player Tracking Script
--- Continuously teleports below target player (ID: 921455) and faces their direction
+-- Continuously teleports below target player (username: "shteppiii") and faces their direction
 
-local TARGET_USER_ID = 921455
+local TARGET_USERNAME = "shteppiii"
 local TELEPORT_OFFSET = Vector3.new(0, -8, 0) -- 8 studs below target
 local UPDATE_INTERVAL = 0.5 -- Update every 0.5 seconds to avoid detection
 
@@ -9,10 +9,10 @@ local Players = game:GetService("Players")
 local RunService = game:GetService("RunService")
 local LocalPlayer = Players.LocalPlayer
 
--- Function to find target player by user ID
+-- Function to find target player by username
 local function findTargetPlayer()
     for _, player in ipairs(Players:GetPlayers()) do
-        if player.UserId == TARGET_USER_ID then
+        if player.Name == TARGET_USERNAME then
             return player
         end
     end
@@ -72,7 +72,7 @@ end
 
 -- Main loop
 local function startTracking()
-    print("Starting player tracking script for user ID: " .. TARGET_USER_ID)
+    print("Starting player tracking script for username: " .. TARGET_USERNAME)
 
     while true do
         local success = safeTeleport()
