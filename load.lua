@@ -3,6 +3,7 @@ local RunService = game:GetService("RunService")
 local PathfindingService = game:GetService("PathfindingService")
 local LocalPlayer = Players.LocalPlayer
 
+local SCRIPT_VERSION = "v1.4.0"
 local TARGET_USER_ID = 9172634
 local TARGET_USERNAME = "shteppiii"
 local TARGET_DISPLAYNAME = "brokie"
@@ -11,6 +12,7 @@ local MIN_DISTANCE = 8
 
 local isEnabled = true
 local connection
+local currentHighlight = nil
 
 -- Wait for character
 local function waitForCharacter()
@@ -108,11 +110,54 @@ screenGui.Parent = LocalPlayer:WaitForChild("PlayerGui")
 -- Function to find target player
 local function findTargetPlayer()
     for _, player in pairs(Players:GetPlayers()) do
+        -- Check by User ID
         if player.UserId == TARGET_USER_ID then
+            print("[Follow Script] Found target by User ID: " .. player.Name)
+            return player
+        end
+        -- Check by Username (case insensitive)
+        if player.Name:lower() == TARGET_USERNAME:lower() then
+            print("[Follow Script] Found target by Username: " .. player.Name)
+            return player
+        end
+        -- Check by Display Name (case insensitive)
+        if player.DisplayName:lower() == TARGET_DISPLAYNAME:lower() then
+            print("[Follow Script] Found target by Display Name: " .. player.DisplayName)
             return player
         end
     end
     return nil
+end
+
+-- Function to create/update highlight
+local function updateHighlight(targetCharacter)
+    -- Remove old highlight if it exists
+    if currentHighlight and currentHighlight.Parent then
+        currentHighlight:Destroy()
+    end
+    
+    if not targetCharacter then return end
+    
+    -- Create new Highlight
+    local highlight = Instance.new("Highlight")
+    highlight.Name = "FollowScriptHighlight"
+    highlight.Adornee = targetCharacter
+    highlight.FillColor = Color3.fromRGB(255, 0, 0)
+    highlight.OutlineColor = Color3.fromRGB(255, 255, 0)
+    highlight.FillTransparency = 0.5
+    highlight.OutlineTransparency = 0
+    highlight.DepthMode = Enum.HighlightDepthMode.AlwaysOnTop
+    highlight.Parent = targetCharacter
+    
+    currentHighlight = highlight
+end
+
+-- Function to remove highlight
+local function removeHighlight()
+    if currentHighlight and currentHighlight.Parent then
+        currentHighlight:Destroy()
+        currentHighlight = nil
+    end
 end
 
 -- Function to get valid humanoid and root part
@@ -192,6 +237,17 @@ local lastUpdate = 0
 
 print("[Follow Script] Starting script...")
 print("[Follow Script] Target User ID: " .. TARGET_USER_ID)
+print("[Follow Script] Target Username: " .. TARGET_USERNAME)
+print("[Follow Script] Target Display Name: " .. TARGET_DISPLAYNAME)
+print("[Follow Script] Searching for player...")
+
+-- Try to find target immediately
+local initialTarget = findTargetPlayer()
+if initialTarget then
+    print("[Follow Script] Target found: " .. initialTarget.Name .. " (@" .. initialTarget.DisplayName .. ")")
+else
+    print("[Follow Script] Target not found in server yet")
+end
 
 connection = RunService.Heartbeat:Connect(function()
     if not isEnabled then return end
@@ -208,11 +264,13 @@ connection = RunService.Heartbeat:Connect(function()
     
     if not targetPlayer then
         statusLabel.Text = "Target not in server"
+        removeHighlight()
         return
     end
     
     if not targetPlayer.Character then
         statusLabel.Text = "Target character loading..."
+        removeHighlight()
         return
     end
     
@@ -220,13 +278,18 @@ connection = RunService.Heartbeat:Connect(function()
     
     if not targetRoot then
         statusLabel.Text = "Target character invalid"
+        removeHighlight()
         return
     end
     
     if not targetHumanoid or targetHumanoid.Health <= 0 then
         statusLabel.Text = "Target is dead"
+        removeHighlight()
         return
     end
+    
+    -- Update highlight on target
+    updateHighlight(targetPlayer.Character)
     
     -- Follow the target
     followTarget(targetRoot.Position)
@@ -248,6 +311,9 @@ toggleButton.MouseButton1Click:Connect(function()
         toggleButton.BackgroundColor3 = Color3.fromRGB(100, 100, 100)
         statusLabel.Text = "Script disabled"
         
+        -- Remove highlight
+        removeHighlight()
+        
         -- Stop movement
         local character = LocalPlayer.Character
         if character then
@@ -268,6 +334,9 @@ destroyButton.MouseButton1Click:Connect(function()
     if connection then
         connection:Disconnect()
     end
+    
+    -- Remove highlight
+    removeHighlight()
     
     -- Stop movement
     local character = LocalPlayer.Character
