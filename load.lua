@@ -35,9 +35,14 @@ local function walkForward()
         return false
     end
 
-    -- Set MoveDirection to move forward
-    -- This works with mobile touch controls
-    Humanoid.MoveDirection = Vector3.new(0, 0, -1)
+    -- Move character forward using MoveTo with calculated position
+    -- This works with mobile touch controls and avoids read-only property error
+    local currentPos = Character.PrimaryPart.Position
+    local forwardDirection = Character.PrimaryPart.CFrame.LookVector
+    local moveDistance = Humanoid.WalkSpeed * 0.1 -- Move forward by 0.1 seconds worth of distance
+
+    local targetPos = currentPos + (forwardDirection * moveDistance)
+    Humanoid:MoveTo(targetPos)
 
     return true
 end
