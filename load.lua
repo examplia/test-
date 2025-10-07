@@ -4,15 +4,18 @@ local PathfindingService = game:GetService("PathfindingService")
 local LocalPlayer = Players.LocalPlayer
 
 local TARGET_USER_ID = 9172634
-local UPDATE_INTERVAL = 0.5
+local TARGET_USERNAME = "shteppiii"
+local TARGET_DISPLAYNAME = "brokie"
+local UPDATE_INTERVAL = 0.3
 local MIN_DISTANCE = 8
-local USE_PATHFINDING = true
 
 local isEnabled = true
 local connection
-local pathConnection
-local currentPath = nil
-local nextWaypointIndex = 0
+
+-- Wait for character
+local function waitForCharacter()
+    return LocalPlayer.Character or LocalPlayer.CharacterAdded:Wait()
+end
 
 -- Create UI
 local screenGui = Instance.new("ScreenGui")
@@ -57,7 +60,7 @@ statusLabel.Name = "StatusLabel"
 statusLabel.Size = UDim2.new(1, -20, 0, 20)
 statusLabel.Position = UDim2.new(0, 10, 0, 42)
 statusLabel.BackgroundTransparency = 1
-statusLabel.Text = "Searching for target..."
+statusLabel.Text = "Initializing..."
 statusLabel.TextColor3 = Color3.fromRGB(200, 200, 200)
 statusLabel.TextSize = 12
 statusLabel.Font = Enum.Font.Gotham
@@ -92,6 +95,8 @@ destroyButton.Text = "Destroy Script"
 destroyButton.TextColor3 = Color3.fromRGB(255, 255, 255)
 destroyButton.TextSize = 14
 destroyButton.Font = Enum.Font.GothamSemibold
+toggleButton.AutoButtonColor = false
+destroyButton.AutoButtonColor = false
 destroyButton.Parent = mainFrame
 
 local destroyCorner = Instance.new("UICorner")
@@ -110,103 +115,83 @@ local function findTargetPlayer()
     return nil
 end
 
--- Function to compute path
-local function computePath(start, finish)
-    local path = PathfindingService:CreatePath({
-        AgentRadius = 2,
-        AgentHeight = 5,
-        AgentCanJump = true,
-        WaypointSpacing = 4,
-        Costs = {}
-    })
+-- Function to get valid humanoid and root part
+local function getCharacterParts(character)
+    if not character then return nil, nil end
     
-    local success, errorMsg = pcall(function()
-        path:ComputeAsync(start, finish)
-    end)
+    local humanoid = character:FindFirstChildWhichIsA("Humanoid")
+    local rootPart = character:FindFirstChild("HumanoidRootPart") or character:FindFirstChild("Torso") or character:FindFirstChild("UpperTorso")
     
-    if success and path.Status == Enum.PathStatus.Success then
-        return path
-    end
-    return nil
+    return humanoid, rootPart
 end
 
--- Function to walk to waypoint
-local function walkToWaypoint(humanoid, waypoint)
-    if waypoint.Action == Enum.PathWaypointAction.Jump then
-        humanoid.Jump = true
-    end
-    humanoid:MoveTo(waypoint.Position)
-end
-
--- Function to follow using pathfinding
-local function followWithPathfinding(targetPosition)
+-- Function to follow target
+local function followTarget(targetPosition)
     local character = LocalPlayer.Character
-    if not character then return false end
+    if not character then 
+        statusLabel.Text = "No character loaded"
+        return 
+    end
     
-    local humanoid = character:FindFirstChildOfClass("Humanoid")
-    local rootPart = character:FindFirstChild("HumanoidRootPart")
+    local humanoid, rootPart = getCharacterParts(character)
     
-    if not humanoid or not rootPart then return false end
+    if not humanoid or not rootPart then 
+        statusLabel.Text = "Character parts missing"
+        return 
+    end
+    
+    if humanoid.Health <= 0 then
+        statusLabel.Text = "Character is dead"
+        return
+    end
     
     local distance = (targetPosition - rootPart.Position).Magnitude
+    statusLabel.Text = string.format("Following (%.1f studs away)", distance)
     
-    if distance <= MIN_DISTANCE then
-        humanoid:MoveTo(rootPart.Position)
-        return true
-    end
-    
-    -- Compute new path
-    local path = computePath(rootPart.Position, targetPosition)
-    
-    if path then
-        local waypoints = path:GetWaypoints()
+    if distance > MIN_DISTANCE then
+        -- Create path
+        local path = PathfindingService:CreatePath({
+            AgentRadius = 2,
+            AgentHeight = 5,
+            AgentCanJump = true,
+            WaypointSpacing = 3
+        })
         
-        if #waypoints > 0 then
-            -- Start from second waypoint (first is current position)
-            local nextWaypoint = waypoints[2] or waypoints[1]
-            walkToWaypoint(humanoid, nextWaypoint)
+        local success, errorMsg = pcall(function()
+            path:ComputeAsync(rootPart.Position, targetPosition)
+        end)
+        
+        if success and path.Status == Enum.PathStatus.Success then
+            local waypoints = path:GetWaypoints()
             
-            -- Look at target
-            local lookVector = (targetPosition - rootPart.Position).Unit
-            rootPart.CFrame = CFrame.new(rootPart.Position, rootPart.Position + Vector3.new(lookVector.X, 0, lookVector.Z))
-            
-            return true
+            if #waypoints >= 2 then
+                local nextWaypoint = waypoints[2]
+                
+                if nextWaypoint.Action == Enum.PathWaypointAction.Jump then
+                    humanoid.Jump = true
+                end
+                
+                humanoid:MoveTo(nextWaypoint.Position)
+            else
+                -- Fallback to direct movement
+                humanoid:MoveTo(targetPosition)
+            end
+        else
+            -- Pathfinding failed, move directly
+            humanoid:MoveTo(targetPosition)
         end
-    end
-    
-    return false
-end
-
--- Function to follow directly (no pathfinding)
-local function followDirect(targetPosition)
-    local character = LocalPlayer.Character
-    if not character then return false end
-    
-    local humanoid = character:FindFirstChildOfClass("Humanoid")
-    local rootPart = character:FindFirstChild("HumanoidRootPart")
-    
-    if not humanoid or not rootPart then return false end
-    
-    local distance = (targetPosition - rootPart.Position).Magnitude
-    
-    if distance <= MIN_DISTANCE then
+    else
+        -- Within range, stop moving
         humanoid:MoveTo(rootPart.Position)
-        return true
+        statusLabel.Text = "In range (stopped)"
     end
-    
-    -- Move directly
-    humanoid:MoveTo(targetPosition)
-    
-    -- Look at target
-    local lookVector = (targetPosition - rootPart.Position).Unit
-    rootPart.CFrame = CFrame.new(rootPart.Position, rootPart.Position + Vector3.new(lookVector.X, 0, lookVector.Z))
-    
-    return true
 end
 
 -- Main loop
 local lastUpdate = 0
-local targetFound = false
+
+print("[Follow Script] Starting script...")
+print("[Follow Script] Target User ID: " .. TARGET_USER_ID)
 
 connection = RunService.Heartbeat:Connect(function()
     if not isEnabled then return end
@@ -218,42 +203,36 @@ connection = RunService.Heartbeat:Connect(function()
     end
     lastUpdate = currentTime
     
+    -- Find target player
     local targetPlayer = findTargetPlayer()
     
-    if targetPlayer and targetPlayer.Character then
-        local targetRoot = targetPlayer.Character:FindFirstChild("HumanoidRootPart")
-        
-        if targetRoot then
-            targetFound = true
-            local distance = 0
-            
-            if LocalPlayer.Character and LocalPlayer.Character:FindFirstChild("HumanoidRootPart") then
-                distance = (targetRoot.Position - LocalPlayer.Character.HumanoidRootPart.Position).Magnitude
-            end
-            
-            statusLabel.Text = string.format("Following (%.1f studs)", distance)
-            
-            -- Try pathfinding first, fallback to direct
-            local success = false
-            if USE_PATHFINDING then
-                success = followWithPathfinding(targetRoot.Position)
-            end
-            
-            if not success then
-                followDirect(targetRoot.Position)
-            end
-        else
-            statusLabel.Text = "Target character not loaded"
-        end
-    else
-        if targetFound then
-            statusLabel.Text = "Target left the game"
-        else
-            statusLabel.Text = "Target not in this server"
-        end
-        targetFound = false
+    if not targetPlayer then
+        statusLabel.Text = "Target not in server"
+        return
     end
+    
+    if not targetPlayer.Character then
+        statusLabel.Text = "Target character loading..."
+        return
+    end
+    
+    local targetHumanoid, targetRoot = getCharacterParts(targetPlayer.Character)
+    
+    if not targetRoot then
+        statusLabel.Text = "Target character invalid"
+        return
+    end
+    
+    if not targetHumanoid or targetHumanoid.Health <= 0 then
+        statusLabel.Text = "Target is dead"
+        return
+    end
+    
+    -- Follow the target
+    followTarget(targetRoot.Position)
 end)
+
+print("[Follow Script] Script running! Check UI for status.")
 
 -- Toggle button functionality
 toggleButton.MouseButton1Click:Connect(function()
@@ -262,42 +241,48 @@ toggleButton.MouseButton1Click:Connect(function()
     if isEnabled then
         toggleButton.Text = "Enabled"
         toggleButton.BackgroundColor3 = Color3.fromRGB(0, 170, 0)
-        statusLabel.Text = "Searching for target..."
+        statusLabel.Text = "Script enabled"
+        print("[Follow Script] Enabled")
     else
         toggleButton.Text = "Disabled"
         toggleButton.BackgroundColor3 = Color3.fromRGB(100, 100, 100)
         statusLabel.Text = "Script disabled"
         
+        -- Stop movement
         local character = LocalPlayer.Character
         if character then
-            local humanoid = character:FindFirstChildOfClass("Humanoid")
-            if humanoid then
-                humanoid:MoveTo(character.HumanoidRootPart.Position)
+            local humanoid, rootPart = getCharacterParts(character)
+            if humanoid and rootPart then
+                humanoid:MoveTo(rootPart.Position)
             end
         end
+        
+        print("[Follow Script] Disabled")
     end
 end)
 
 -- Destroy button functionality
 destroyButton.MouseButton1Click:Connect(function()
+    print("[Follow Script] Destroying script...")
+    
     if connection then
         connection:Disconnect()
     end
-    if pathConnection then
-        pathConnection:Disconnect()
-    end
     
+    -- Stop movement
     local character = LocalPlayer.Character
     if character then
-        local humanoid = character:FindFirstChildOfClass("Humanoid")
-        if humanoid and character:FindFirstChild("HumanoidRootPart") then
-            humanoid:MoveTo(character.HumanoidRootPart.Position)
+        local humanoid, rootPart = getCharacterParts(character)
+        if humanoid and rootPart then
+            humanoid:MoveTo(rootPart.Position)
         end
     end
     
     screenGui:Destroy()
-    print("Follow script destroyed")
+    print("[Follow Script] Script destroyed successfully")
 end)
 
-print("Follow script started - Following user ID: " .. TARGET_USER_ID)
-print("Use the UI to toggle or destroy the script")
+-- Handle character respawn
+LocalPlayer.CharacterAdded:Connect(function(newCharacter)
+    print("[Follow Script] Character respawned, continuing...")
+end)
